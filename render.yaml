@@ -3,14 +3,18 @@ services:
     name: atlas-60s-worker
     runtime: python
     plan: starter
+    branch: main
+    autoDeployTrigger: commit
     buildCommand: pip install -r requirements.txt
     startCommand: python worker_60s.py
     envVars:
-      - key: ATLAS_INTERVAL_SECONDS
-        value: "60"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
         sync: false
       - key: SUPABASE_WRITE_KEY
         sync: false
+      - key: ATLAS_INTERVAL_SECONDS
+        value: "60"
+      - key: ATLAS_BENCHMARK
+        value: QQQ
