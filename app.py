@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import html
-import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, time
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -13,7 +11,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from chart_engine import make_analysis_chart, select_chart_frame
-from core import analyze_symbol, safe_float
+from core import analyze_symbol
 from data_provider import (
     daily_history,
     hourly_history,
@@ -23,7 +21,6 @@ from data_provider import (
 )
 from earnings_engine import earnings_info, lotto_label
 from flow_engine import market_pulse, money_flow_metrics, rank_candidate
-from journal_engine import journal_stats, load_journal
 from live_feed import make_feed
 from market_story_engine import build_market_narrative
 from opportunity_engine import rank_opportunities
@@ -57,7 +54,6 @@ from snapshot_store import (
 
 APP_TITLE = "ATLAS X 2.1 — COMPLETE MARKET UPDATE"
 SAN_JOSE_TZ = ZoneInfo("America/Los_Angeles")
-JOURNAL_PATH = Path(__file__).with_name("trading_journal.csv")
 DEFAULT = ['AAPL', 'ABBV', 'ADBE', 'ALAB', 'AMD', 'AMAT', 'AMZN', 'ARKX', 'ARM', 'ASML', 'ASTS', 'AVGO', 'BA', 'BAC', 'BE', 'BWXT', 'CAT', 'CCJ', 'CIBR', 'COP', 'CRM', 'CRWD', 'CVX', 'DELL', 'FTNT', 'GLW', 'GOOG', 'GOOGL', 'GS', 'IBM', 'IGV', 'INTC', 'IONQ', 'IWM', 'JNJ', 'JPM', 'KLAC', 'LEU', 'LLY', 'LRCX', 'LUNR', 'META', 'MP', 'MRK', 'MRVL', 'MS', 'MSFT', 'MU', 'NBIS', 'NOW', 'NVDA', 'OKLO', 'OKTA', 'ORCL', 'OXY', 'PANW', 'PLTR', 'POWL', 'QCOM', 'QBTS', 'QQQ', 'QUBT', 'RDW', 'RGTI', 'RKLB', 'SLB', 'SMCI', 'SMH', 'SMR', 'SNDK', 'SOXX', 'SPCX', 'SPY', 'TSLA', 'TSM', 'UNH', 'URA', 'USAR', 'UUUU', 'VRT', 'WDC', 'WFC', 'XLE', 'XLF', 'XLI', 'XLV', 'XOM', 'ZS']
 
 st.set_page_config(page_title=APP_TITLE, page_icon="⚡", layout="wide")
@@ -970,7 +966,6 @@ tabs = st.tabs([
     "FLOW RADAR",
     "Watch Engine",
     "AI SEMI ONLY",
-    "Journal",
     "System Health",
     "Earnings 14D",
 ])
@@ -1214,7 +1209,7 @@ with tabs[2]:
                 st.warning(text)
 
 
-with tabs[13]:
+with tabs[12]:
     st.subheader("📅 Earnings Radar — 14 ngày")
     st.caption(
         "Tự động chỉ hiện mã có ER trong 14 ngày. "
@@ -1711,19 +1706,8 @@ with tabs[10]:
 
 
 
+
 with tabs[11]:
-    journal = load_journal(JOURNAL_PATH)
-    stats = journal_stats(journal)
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Trades", stats["Trades"])
-    win_rate = safe_float(stats["Win Rate"], np.nan)
-    c2.metric("Win rate", "N/A" if not math.isfinite(win_rate) else f"{win_rate:.1f}%")
-    c3.metric("Net P/L", f"${stats['Net P/L']:+,.0f}")
-    if not journal.empty:
-        st.dataframe(journal, use_container_width=True)
-
-
-with tabs[12]:
     st.subheader("🩺 System Health — Always-On Scanner")
 
     freshness = snapshot_freshness(

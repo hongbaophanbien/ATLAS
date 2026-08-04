@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.pyc
+atlas_local_secrets.bat
+.env
