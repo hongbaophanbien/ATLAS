@@ -887,6 +887,129 @@ def sticky_fast_picks_html(frame):
     </div>
     """
 
+
+def compact_status_strip(items):
+    """Render important-but-secondary HOME metrics in a compact row."""
+    cards = []
+    for label, value in items:
+        cards.append(
+            '<div class="atlas-mini-card">'
+            f'<div class="atlas-mini-label">{html.escape(str(label))}</div>'
+            f'<div class="atlas-mini-value">{html.escape(str(value))}</div>'
+            '</div>'
+        )
+
+    st.markdown(
+        """
+        <style>
+          .atlas-mini-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            margin: 4px 0 10px 0;
+          }
+          .atlas-mini-card {
+            border: 1px solid #2c3441;
+            border-radius: 8px;
+            background: #111720;
+            padding: 8px 10px;
+            min-height: 52px;
+          }
+          .atlas-mini-label {
+            color: #9da8b7;
+            font-size: 0.72rem;
+            line-height: 1.05rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .atlas-mini-value {
+            color: #f5f7fa;
+            font-size: 1.02rem;
+            line-height: 1.3rem;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          @media (max-width: 760px) {
+            .atlas-mini-grid {
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+          }
+        </style>
+        <div class="atlas-mini-grid">""" + "".join(cards) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def prepare_option_shortlist(opportunities, option_budget):
+    """Create the actionable option shortlist used on HOME."""
+    if opportunities is None or opportunities.empty:
+        return pd.DataFrame()
+
+    enriched = prepare_main_decision_frame(enrich_earnings(opportunities))
+    if "Days to ER" in enriched.columns:
+        enriched = enriched[
+            enriched["Days to ER"].isna() | (enriched["Days to ER"] > 2)
+        ].reset_index(drop=True)
+
+    if "Decision" not in enriched.columns:
+        return pd.DataFrame()
+
+    actionable = enriched[
+        enriched["Decision"].isin(
+            ["BUY CALL", "WATCH CALL", "BUY PUT", "WATCH PUT"]
+        )
+    ].copy()
+
+    top = actionable.head(10)
+    if top.empty:
+        return pd.DataFrame()
+
+    contracts = shortlist_contracts(
+        top,
+        "Ngày mai",
+        option_budget,
+        limit=min(10, len(top)),
+        lotto_mode=False,
+    )
+    contracts = fill_option_signals(contracts, enriched)
+    return compact_numbers(contracts)
+
+
+def render_option_shortlist(opportunities, option_budget, table_height=430):
+    """Render Option Shortlist at the top of HOME."""
+    st.markdown("### 🎯 Option Shortlist")
+    st.caption(
+        "Danh sách CALL/PUT ưu tiên từ snapshot mới nhất. "
+        "Bảng này được đưa lên HOME để xem ngay khi mở ATLAS."
+    )
+
+    contracts = prepare_option_shortlist(opportunities, option_budget)
+    option_columns = [
+        "Ticker", "Signal", "Expiration", "Stock Price", "Strike",
+        "Bid", "Ask", "Premium", "Delta", "Theta/day", "IV",
+        "Volume", "OI", "Contract Score", "Stock Confidence",
+    ]
+
+    if contracts.empty:
+        st.info(
+            "Chưa có contract đạt đủ điều kiện thanh khoản/ngân sách "
+            "trong snapshot hiện tại."
+        )
+        return
+
+    option_columns = [
+        column for column in option_columns if column in contracts.columns
+    ]
+    show_global_table(
+        contracts[option_columns],
+        height=table_height,
+        sticky_columns=("Ticker",),
+    )
+
+
 with st.sidebar:
     st.header("Thiết lập")
     st.text_area(
@@ -1008,12 +1131,21 @@ def run_full_scan():
 
 with tabs[0]:
     st.subheader("🏠 ATLAS HOME")
+
+    home_opportunities = st.session_state.get("opportunities", pd.DataFrame())
+    render_option_shortlist(
+        home_opportunities,
+        option_budget,
+        table_height=430,
+    )
+
     now = sj_now()
-    h1,h2,h3,h4 = st.columns(4)
-    h1.metric("San Jose", now.strftime("%I:%M:%S %p"))
-    h2.metric("Market mode", market_mode(now))
-    h3.metric("Watchlist", len(symbols))
-    h4.metric("Last scan", st.session_state.get("scan_time","Never"))
+    compact_status_strip([
+        ("San Jose", now.strftime("%I:%M:%S %p")),
+        ("Market mode", market_mode(now)),
+        ("Watchlist", len(symbols)),
+        ("Last scan", st.session_state.get("scan_time", "Never")),
+    ])
 
     if st.session_state.get("loaded_background_snapshot"):
         st.success(
@@ -1050,11 +1182,12 @@ with tabs[0]:
         )
     )
 
-    q1,q2,q3,q4 = st.columns(4)
-    q1.metric("Yêu cầu quét", requested_count)
-    q2.metric("Đã phân tích", scanned_count)
-    q3.metric("Đủ chuẩn", qualified_count)
-    q4.metric("Ẩn / lỗi", hidden_count + failed_count)
+    compact_status_strip([
+        ("Yêu cầu quét", requested_count),
+        ("Đã phân tích", scanned_count),
+        ("Đủ chuẩn", qualified_count),
+        ("Ẩn / lỗi", hidden_count + failed_count),
+    ])
     st.caption(
         "Top Opportunities chỉ hiện mã vượt bộ lọc. "
         "Các mã còn lại vẫn được quét nhưng không đủ chuẩn để khuyến nghị."
@@ -1093,11 +1226,12 @@ with tabs[0]:
             )
     else:
         pulse = market_pulse(scan)
-        c1,c2,c3,c4 = st.columns(4)
-        c1.metric("Regime", pulse.get("Regime"))
-        c2.metric("Market Pulse", f"{pulse.get('Market Pulse',0):.0f}")
-        c3.metric("Risk", f"{pulse.get('Risk Level',0):.0f}")
-        c4.metric("Breadth", f"{pulse.get('Breadth Up %',0):.0f}%")
+        compact_status_strip([
+            ("Regime", pulse.get("Regime")),
+            ("Market Pulse", f"{pulse.get('Market Pulse',0):.0f}"),
+            ("Risk", f"{pulse.get('Risk Level',0):.0f}"),
+            ("Breadth", f"{pulse.get('Breadth Up %',0):.0f}%"),
+        ])
         st.info(build_market_narrative(scan, rotation))
 
         st.markdown("### 🔥 Top Opportunities")
@@ -1145,43 +1279,6 @@ with tabs[1]:
             sticky_columns=("Ticker",),
         )
 
-        # Use only actionable CALL/PUT rows for option selection.
-        actionable = enriched[
-            enriched["Decision"].isin(
-                ["BUY CALL", "WATCH CALL", "BUY PUT", "WATCH PUT"]
-            )
-        ].copy()
-        top = actionable.head(10)
-        contracts = shortlist_contracts(
-            top,
-            "Ngày mai",
-            option_budget,
-            limit=min(10, len(top)),
-            lotto_mode=False,
-        )
-        contracts = fill_option_signals(contracts, enriched)
-        contracts = compact_numbers(contracts)
-
-        st.markdown("### Option shortlist")
-        option_columns = [
-            "Ticker", "Signal", "Expiration", "Stock Price", "Strike",
-            "Bid", "Ask", "Premium", "Delta", "Theta/day", "IV",
-            "Volume", "OI", "Contract Score", "Stock Confidence",
-        ]
-        if contracts.empty:
-            st.info(
-                "Chưa có contract đạt đủ thanh khoản/ngân sách trong lần quét này. "
-                "Bảng sẽ tự xuất hiện khi có BUY/WATCH CALL hoặc PUT hợp lệ."
-            )
-        else:
-            option_columns = [
-                column for column in option_columns if column in contracts.columns
-            ]
-            show_global_table(
-                contracts[option_columns],
-                height=500,
-                sticky_columns=("Ticker",),
-            )
 
 
 with tabs[2]:
@@ -1547,17 +1644,45 @@ with tabs[8]:
 
         flow_columns = [
             "Ticker", "Side", "Contract", "Flow Score", "Alignment",
-            "Chart Bias", "Overnight %", "Overnight Bias", "Overnight Confirm", "Gap Risk", "Premium Proxy", "Volume", "OI", "Vol/OI",
+            "Chart Bias", "Overnight %", "Overnight Bias", "Overnight Confirm",
+            "Gap Risk", "Premium Proxy", "Volume", "OI", "Vol/OI",
             "Spread %", "IV %", "Delta", "DTE", "Moneyness %",
-            "Interpretation", "Trigger", "Invalidation", "Execution", "Source",
+            "Interpretation", "Trigger", "Invalidation", "Execution",
         ]
         flow_columns = [c for c in flow_columns if c in filtered_flow.columns]
 
         if filtered_flow.empty:
             st.info("Không có hợp đồng vượt bộ lọc hiện tại.")
         else:
+            # Keep every original contract and column, but group contracts from
+            # the same ticker together. Repeated ticker labels are hidden so
+            # NVDA, SPY, AVGO... read as clear visual groups.
+            grouped_flow = filtered_flow.copy()
+
+            sort_columns = [
+                column for column in ["Ticker", "Flow Score", "DTE", "Contract"]
+                if column in grouped_flow.columns
+            ]
+            ascending = [
+                True if column == "Ticker" else False
+                for column in sort_columns
+            ]
+            if sort_columns:
+                grouped_flow = grouped_flow.sort_values(
+                    sort_columns,
+                    ascending=ascending,
+                    kind="stable",
+                ).reset_index(drop=True)
+
+            display_flow = grouped_flow[flow_columns].copy()
+            if "Ticker" in display_flow.columns:
+                duplicate_ticker = display_flow["Ticker"].eq(
+                    display_flow["Ticker"].shift()
+                )
+                display_flow.loc[duplicate_ticker, "Ticker"] = ""
+
             show_global_table(
-                filtered_flow[flow_columns],
+                display_flow,
                 height=650,
                 sticky_columns=("Ticker",),
             )
