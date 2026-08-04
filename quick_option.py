@@ -67,7 +67,18 @@ def _expirations(symbol: str, horizon: str):
     return [x[1] for x in sorted(result)[:3]]
 
 
+def _normalize_signal(value: str) -> str:
+    text = str(value or "").strip().upper()
+    if "CALL" in text:
+        return "CALL"
+    if "PUT" in text:
+        return "PUT"
+    return ""
+
 def best_contract(symbol: str, signal: str, spot: float, horizon: str, budget: float, er_date=None, lotto_mode=False) -> dict:
+    signal = _normalize_signal(signal)
+    if signal not in {"CALL", "PUT"}:
+        return {}
     rows = []
     today = date.today()
     ticker = yf.Ticker(symbol)
@@ -160,7 +171,9 @@ def shortlist_contracts(signals: pd.DataFrame, horizon: str, budget: float, limi
     for _, row in signals.head(limit).iterrows():
         contract = best_contract(
             str(row["Ticker"]),
-            str(row.get("Signal", row.get("Action", ""))).replace("BUY ", "").strip(),
+            _normalize_signal(
+                row.get("Signal", row.get("Decision", row.get("Action", "")))
+            ),
             float(row["Price"]),
             horizon,
             budget,

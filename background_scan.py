@@ -16,6 +16,7 @@ from option_flow_radar import build_flow_radar
 from sector_engine import THEMES, build_theme_rotation
 from snapshot_store import frame_to_records, save_snapshot, load_watchlist_settings
 from watchlist_bot import build_signal_tables
+from atlas_signal_refresh_hotfix import apply_decisions
 
 SAN_JOSE=ZoneInfo("America/Los_Angeles")
 DEFAULT = ['AAPL', 'ABBV', 'ADBE', 'ALAB', 'AMD', 'AMAT', 'AMZN', 'ARKX', 'ARM', 'ASML', 'ASTS', 'AVGO', 'BA', 'BAC', 'BE', 'BWXT', 'CAT', 'CCJ', 'CIBR', 'COP', 'CRM', 'CRWD', 'CVX', 'DELL', 'FTNT', 'GLW', 'GOOG', 'GOOGL', 'GS', 'IBM', 'IGV', 'INTC', 'IONQ', 'IWM', 'JNJ', 'JPM', 'KLAC', 'LEU', 'LLY', 'LRCX', 'LUNR', 'META', 'MP', 'MRK', 'MRVL', 'MS', 'MSFT', 'MU', 'NBIS', 'NOW', 'NVDA', 'OKLO', 'OKTA', 'ORCL', 'OXY', 'PANW', 'PLTR', 'POWL', 'QCOM', 'QBTS', 'QQQ', 'QUBT', 'RDW', 'RGTI', 'RKLB', 'SLB', 'SMCI', 'SMH', 'SMR', 'SNDK', 'SOXX', 'SPCX', 'SPY', 'TSLA', 'TSM', 'UNH', 'URA', 'USAR', 'UUUU', 'VRT', 'WDC', 'WFC', 'XLE', 'XLF', 'XLI', 'XLV', 'XOM', 'ZS']
@@ -179,7 +180,7 @@ def main():
 
     scan = pd.DataFrame(rows)
     rotation = build_theme_rotation(scan)
-    opportunities = rank_opportunities(scan)
+    opportunities = apply_decisions(rank_opportunities(scan))
     calls, puts = build_signal_tables(scan)
     board = pd.concat([calls, puts], ignore_index=True, sort=False)
     flow_radar, flow_radar_status = build_flow_with_fallback(

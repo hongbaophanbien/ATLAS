@@ -28,6 +28,11 @@ from live_feed import make_feed
 from market_story_engine import build_market_narrative
 from opportunity_engine import rank_opportunities
 from quick_option import shortlist_contracts
+from atlas_signal_refresh_hotfix import (
+    apply_decisions,
+    fill_option_signals,
+    compact_numbers,
+)
 from retest_engine import analyze_retest
 from sector_engine import THEMES, build_theme_rotation
 from story_engine import analyst_consensus, signal_fusion, build_story
@@ -705,10 +710,8 @@ def prepare_main_decision_frame(frame):
         trailing = pd.to_numeric(output["Trailing Stop"], errors="coerce")
         output["Stop"] = pd.concat([stop, trailing], axis=1).mean(axis=1, skipna=True)
 
-    output["Decision"] = output.apply(
-        lambda row: _combine_unique_text(row, ["Category", "Action", "Signal"]),
-        axis=1,
-    )
+    # Decision must be a real CALL/PUT decision, not concatenated labels.
+    output = apply_decisions(output)
 
     drop_columns = [
         "Extended Price", "Overnight %", "Overnight Confirm",
@@ -1130,20 +1133,30 @@ with tabs[1]:
         st.info("Chưa có dữ liệu hoặc không có setup đủ chuẩn.")
     else:
         enriched = prepare_main_decision_frame(enrich_earnings(opportunities))
-        enriched = enriched[
-            enriched["Days to ER"].isna() | (enriched["Days to ER"] > 2)
-        ].reset_index(drop=True)
+        if "Days to ER" in enriched.columns:
+            enriched = enriched[
+                enriched["Days to ER"].isna() | (enriched["Days to ER"] > 2)
+            ].reset_index(drop=True)
 
         st.caption(
             "Kéo ngang để xem thêm cột. Chỉ Ticker được giữ cố định khi kéo ngang."
         )
+        fast_display = enriched[[
+            c for c in FAST_PICK_COLUMNS if c in enriched.columns
+        ]]
         show_global_table(
-            prepare_main_decision_frame(enriched)[[c for c in FAST_PICK_COLUMNS if c in prepare_main_decision_frame(enriched).columns]],
+            fast_display,
             height=650,
             sticky_columns=("Ticker",),
         )
 
-        top = enriched.head(10)
+        # Use only actionable CALL/PUT rows for option selection.
+        actionable = enriched[
+            enriched["Decision"].isin(
+                ["BUY CALL", "WATCH CALL", "BUY PUT", "WATCH PUT"]
+            )
+        ].copy()
+        top = actionable.head(10)
         contracts = shortlist_contracts(
             top,
             "Ngày mai",
@@ -1151,15 +1164,21 @@ with tabs[1]:
             limit=min(10, len(top)),
             lotto_mode=False,
         )
+        contracts = fill_option_signals(contracts, enriched)
+        contracts = compact_numbers(contracts)
+
+        st.markdown("### Option shortlist")
+        option_columns = [
+            "Ticker", "Signal", "Expiration", "Stock Price", "Strike",
+            "Bid", "Ask", "Premium", "Delta", "Theta/day", "IV",
+            "Volume", "OI", "Contract Score", "Stock Confidence",
+        ]
         if contracts.empty:
-            st.warning("Không có contract đủ thanh khoản/ngân sách.")
+            st.info(
+                "Chưa có contract đạt đủ thanh khoản/ngân sách trong lần quét này. "
+                "Bảng sẽ tự xuất hiện khi có BUY/WATCH CALL hoặc PUT hợp lệ."
+            )
         else:
-            st.markdown("### Option shortlist")
-            option_columns = [
-                "Ticker", "Signal", "Expiration", "Stock Price", "Strike",
-                "Bid", "Ask", "Premium", "Delta", "Theta/day", "IV",
-                "Volume", "OI", "Contract Score", "Stock Confidence",
-            ]
             option_columns = [
                 column for column in option_columns if column in contracts.columns
             ]
