@@ -1,0 +1,64 @@
+name: ATLAS Background Scanner Backup
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "2-59/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-background-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run ATLAS background scanner
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_WRITE_KEY: ${{ secrets.SUPABASE_WRITE_KEY }}
+
+          ATLAS_BENCHMARK: QQQ
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_SHA: ${{ github.sha }}
+
+        shell: bash
+        run: |
+          set -o pipefail
+
+          for attempt in 1 2; do
+            echo "ATLAS scan attempt ${attempt}/2"
+
+            if python background_scan.py; then
+              echo "ATLAS scan completed successfully."
+              exit 0
+            fi
+
+            echo "ATLAS scan failed. Retrying in 20 seconds..."
+            sleep 20
+          done
+
+          echo "ATLAS scanner failed after two attempts."
+          exit 1
