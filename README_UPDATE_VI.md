@@ -1,26 +1,46 @@
-# ATLAS Trade Plan — Single Panel Update
+# ATLAS Flow Radar — Classic Grouped Restore
 
-## Thay đổi
+Bản này phục hồi Flow Radar giống hình mẫu:
 
-- Gộp hai khung trong Trade Plan thành **một khung duy nhất**.
-- Phần Signal Fusion nằm trên cùng bên trong cùng một panel.
-- Phần kế hoạch cụ thể nằm ngay bên dưới:
-  - Price Used / Session / Updated
-  - Money In / Money Out
-  - Trend Score / Entry Score
-  - Entry / Trigger / Stop
-  - TP1 / TP2 / Stretch
-  - Plan A / B / C
-- Giữ nguyên toàn bộ thông tin, chỉ bỏ khoảng trống và viền tách đôi.
+- Hiển thị từng contract riêng biệt.
+- Các contract cùng ticker nằm liền nhau.
+- Ticker chỉ hiện ở dòng đầu của mỗi nhóm.
+- Trong mỗi ticker, Flow Score cao nhất đứng trước.
+- Giữ các cột:
+  - Ticker
+  - Side
+  - Contract
+  - Flow Score
+  - Alignment
+  - Chart Bias
+  - Overnight %
+  - Overnight Bias
+  - Overnight Confirm
+  - Gap Risk
+  - Premium Proxy
+  - Volume
+  - OI
+  - Vol/OI
+  - Spread %
+  - IV %
+  - Delta
+  - DTE
+  - Moneyness %
+  - Interpretation
+  - Trigger
+  - Invalidation
+  - Execution
+- Không hiển thị Source.
+- Giữ logic retry và khôi phục contract từ snapshot trước nếu Yahoo tạm thời trả rỗng.
 
-## Cách cập nhật
+## Cập nhật
 
-Upload và thay thế 3 file:
-- `app.py`
-- `trade_plan_engine.py`
-- `signal_brain.py`
+Upload và thay thế 3 file trong thư mục gốc GitHub ATLAS:
 
-Sau đó commit vào branch `main`.
+1. app.py
+2. background_scan.py
+3. option_flow_radar.py
 
-Để đồng bộ máy local, copy cùng 3 file vào thư mục ATLAS trên máy.
-Worker không cần khởi động lại vì đây chủ yếu là thay đổi giao diện Trade Plan.
+Sau đó commit vào main và chạy GitHub Action thủ công một lần.
+
+Trên máy local, copy cùng 3 file và khởi động lại worker.

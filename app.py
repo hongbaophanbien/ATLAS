@@ -1661,48 +1661,82 @@ with tabs[7]:
             int((filtered_flow.get("Alignment", pd.Series(dtype=str)) == "ALIGNED").sum()),
         )
 
+        # Classic Flow Radar layout requested by the user.
+        # Preserve every contract row and all original decision columns.
+        # Source remains hidden because it is repeated on every row.
         flow_columns = [
-            "Ticker", "Side", "Contract", "Flow Score", "Alignment",
-            "Chart Bias", "Overnight %", "Overnight Bias", "Overnight Confirm",
-            "Gap Risk", "Premium Proxy", "Volume", "OI", "Vol/OI",
-            "Spread %", "IV %", "Delta", "DTE", "Moneyness %",
-            "Interpretation", "Trigger", "Invalidation", "Execution",
+            "Ticker",
+            "Side",
+            "Contract",
+            "Flow Score",
+            "Alignment",
+            "Chart Bias",
+            "Overnight %",
+            "Overnight Bias",
+            "Overnight Confirm",
+            "Gap Risk",
+            "Premium Proxy",
+            "Volume",
+            "OI",
+            "Vol/OI",
+            "Spread %",
+            "IV %",
+            "Delta",
+            "DTE",
+            "Moneyness %",
+            "Interpretation",
+            "Trigger",
+            "Invalidation",
+            "Execution",
         ]
-        flow_columns = [c for c in flow_columns if c in filtered_flow.columns]
+        flow_columns = [
+            column for column in flow_columns
+            if column in filtered_flow.columns
+        ]
 
         if filtered_flow.empty:
             st.info("Không có hợp đồng vượt bộ lọc hiện tại.")
         else:
-            # Keep every original contract and column, but group contracts from
-            # the same ticker together. Repeated ticker labels are hidden so
-            # NVDA, SPY, AVGO... read as clear visual groups.
             grouped_flow = filtered_flow.copy()
 
+            # Group AVGO contracts together, then BAC, CRM, JPM...
+            # Within each ticker, strongest Flow Score appears first.
+            sort_spec = [
+                ("Ticker", True),
+                ("Flow Score", False),
+                ("DTE", True),
+                ("Contract", True),
+            ]
             sort_columns = [
-                column for column in ["Ticker", "Flow Score", "DTE", "Contract"]
+                column for column, _ in sort_spec
                 if column in grouped_flow.columns
             ]
-            ascending = [
-                True if column == "Ticker" else False
-                for column in sort_columns
+            sort_ascending = [
+                ascending for column, ascending in sort_spec
+                if column in grouped_flow.columns
             ]
+
             if sort_columns:
                 grouped_flow = grouped_flow.sort_values(
                     sort_columns,
-                    ascending=ascending,
+                    ascending=sort_ascending,
                     kind="stable",
+                    na_position="last",
                 ).reset_index(drop=True)
 
             display_flow = grouped_flow[flow_columns].copy()
+
+            # Show ticker once at the start of each group, exactly like the
+            # requested screenshot, while preserving every contract underneath.
             if "Ticker" in display_flow.columns:
-                duplicate_ticker = display_flow["Ticker"].eq(
+                repeated = display_flow["Ticker"].eq(
                     display_flow["Ticker"].shift()
                 )
-                display_flow.loc[duplicate_ticker, "Ticker"] = ""
+                display_flow.loc[repeated, "Ticker"] = ""
 
             show_global_table(
                 display_flow,
-                height=650,
+                height=720,
                 sticky_columns=("Ticker",),
             )
 
