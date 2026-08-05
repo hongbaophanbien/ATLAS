@@ -75,6 +75,7 @@ def signal_fusion_html(
     retest: dict,
     base: dict,
     flow: dict,
+    embedded: bool = False,
 ) -> str:
     verdict = _verdict(plan, fusion, retest, base, flow)
     trend_score = safe_float(plan.get("Trend Score"), 50)
@@ -122,9 +123,10 @@ def signal_fusion_html(
             f"${retest_low:,.2f}–${retest_high:,.2f}; chỉ đổi bias sau trigger rõ."
         )
 
-    return f"""
+    styles = f"""
 <style>
 .sf-wrap{{font-family:Arial;color:#f3f5f8;background:#0f151f;border:1px solid #303b4d;border-radius:18px;padding:18px}}
+.sf-embedded{{font-family:Arial;color:#f3f5f8;padding:0;margin:0 0 16px 0}}
 .sf-verdict{{padding:15px 18px;border-radius:13px;font-size:21px;font-weight:900;margin-bottom:14px}}
 .sf-verdict.good{{background:#123c2d;color:#8ef0bd}} .sf-verdict.bad{{background:#491d2a;color:#ff9eb3}}
 .sf-verdict.wait{{background:#453a19;color:#ffe08a}}
@@ -138,7 +140,8 @@ def signal_fusion_html(
 ul{{margin:8px 0 0 18px;padding:0}}
 @media(max-width:700px){{.sf-grid{{grid-template-columns:1fr 1fr}}.sf-bottom{{grid-template-columns:1fr}}}}
 </style>
-<div class="sf-wrap">
+"""
+    content = f"""
   <div class="sf-verdict {tone_class}">{html.escape(verdict["title"])}</div>
   <div class="sf-grid">
     <div class="sf-card"><div class="sf-label">Ticker</div><div class="sf-value">{html.escape(ticker)}</div></div>
@@ -155,5 +158,6 @@ ul{{margin:8px 0 0 18px;padding:0}}
     <div class="sf-section"><b>Tại sao?</b><ul>{reasons_html}</ul></div>
   </div>
   <div class="sf-section" style="margin-top:12px">{action_steps}</div>
-</div>
 """
+    wrapper_class = "sf-embedded" if embedded else "sf-wrap"
+    return styles + f'<div class="{wrapper_class}">' + content + "</div>"

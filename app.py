@@ -1460,15 +1460,19 @@ with tabs[5]:
         fusion = signal_fusion(base, flow, plan, {})
         retest = analyze_retest(daily, base)
 
-        # Keep the full Signal Fusion information, then the concrete plan.
-        components.html(
-            signal_fusion_html(ticker, plan, fusion, retest, base, flow),
-            height=760,
-            scrolling=True,
+        # Signal Fusion + Trade Plan are now rendered inside one single panel.
+        fusion_section = signal_fusion_html(
+            ticker,
+            plan,
+            fusion,
+            retest,
+            base,
+            flow,
+            embedded=True,
         )
         components.html(
-            trade_plan_html(plan),
-            height=1320,
+            trade_plan_html(plan, fusion_section=fusion_section),
+            height=1950,
             scrolling=True,
         )
 

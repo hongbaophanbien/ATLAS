@@ -150,7 +150,7 @@ def build_trade_plan(symbol,daily,row,mtf,horizon,x_sentiment_score=0.0,x_confid
         "Reasons":reasons,
     }
 
-def trade_plan_html(plan):
+def trade_plan_html(plan, fusion_section=''):
     if not plan:return "<div>Không đủ dữ liệu.</div>"
     def money(k):
         v=safe_float(plan.get(k),np.nan)
@@ -172,6 +172,7 @@ def trade_plan_html(plan):
 @media(max-width:900px){{.grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}@media(max-width:600px){{.scores,.grid,.scenarios{{grid-template-columns:1fr}}.atlas{{padding:12px}}.title{{font-size:22px}}.value{{font-size:18px}}}}
 </style>
 <div class="atlas">
+{fusion_section}
 <div class="head"><div><div class="title">{plan.get('Ticker')} — {plan.get('Horizon')}</div><div style="color:#aeb8c8;margin-top:5px">Phân tích {plan.get('Analysis Time')} • Hiệu lực đến {plan.get('Valid Until')}</div><div style="color:#aeb8c8;margin-top:5px">Price Used {money('Price')} • Session {plan.get('Price Session')} • Updated {plan.get('Price Updated')}</div><div style="color:#aeb8c8;margin-top:5px">{plan.get('Bias')} • Confidence {safe_float(plan.get('Confidence')):.0f}%</div></div><div class="action">{plan.get('Action')}</div></div>
 <div class="scores">
 <div class="box"><div class="label">Money In</div><div class="value" style="color:#65e6a4">{safe_float(plan.get('Money In')):.1f}</div></div>

@@ -1,21 +1,26 @@
-# ATLAS Flow Radar — Grouped Tickers Update
+# ATLAS Trade Plan — Single Panel Update
 
 ## Thay đổi
 
-- Bỏ cột `Source` khỏi bảng Flow Radar.
-- Giữ nguyên toàn bộ các cột còn lại.
-- Giữ nguyên từng contract riêng lẻ.
-- Sắp xếp các contract cùng ticker nằm cạnh nhau.
-- Tên ticker chỉ hiển thị ở dòng đầu của mỗi nhóm để NVDA, SPY, AVGO, CRM... dễ đọc hơn.
-- Trong mỗi ticker, contract có Flow Score cao hơn nằm trước.
+- Gộp hai khung trong Trade Plan thành **một khung duy nhất**.
+- Phần Signal Fusion nằm trên cùng bên trong cùng một panel.
+- Phần kế hoạch cụ thể nằm ngay bên dưới:
+  - Price Used / Session / Updated
+  - Money In / Money Out
+  - Trend Score / Entry Score
+  - Entry / Trigger / Stop
+  - TP1 / TP2 / Stretch
+  - Plan A / B / C
+- Giữ nguyên toàn bộ thông tin, chỉ bỏ khoảng trống và viền tách đôi.
 
-## Cách upload
+## Cách cập nhật
 
-1. Giải nén ZIP.
-2. Upload `app.py` vào thư mục gốc repository GitHub `ATLAS`.
-3. Chọn thay thế file cũ.
-4. Commit vào branch `main`.
-5. Đợi Streamlit redeploy.
+Upload và thay thế 3 file:
+- `app.py`
+- `trade_plan_engine.py`
+- `signal_brain.py`
 
-Có thể copy cùng `app.py` vào thư mục ATLAS trên máy để đồng bộ source.
-Worker 60 giây không cần khởi động lại vì thay đổi này chỉ liên quan giao diện.
+Sau đó commit vào branch `main`.
+
+Để đồng bộ máy local, copy cùng 3 file vào thư mục ATLAS trên máy.
+Worker không cần khởi động lại vì đây chủ yếu là thay đổi giao diện Trade Plan.
