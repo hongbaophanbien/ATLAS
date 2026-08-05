@@ -10,6 +10,7 @@ HORIZON = {
     "Ngày mai": {"lookback": 30, "tp1_atr": 1.40, "tp2_atr": 2.00, "stretch_atr": 2.80},
     "Swing 3–5 ngày": {"lookback": 60, "tp1_atr": 1.95, "tp2_atr": 2.75, "stretch_atr": 3.70},
     "Swing 1–2 tuần": {"lookback": 100, "tp1_atr": 2.70, "tp2_atr": 3.70, "stretch_atr": 4.80},
+    "Swing 2–3 tháng": {"lookback": 240, "tp1_atr": 4.20, "tp2_atr": 6.20, "stretch_atr": 8.20},
 }
 
 def clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:

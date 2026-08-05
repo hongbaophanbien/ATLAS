@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd
 from core import analyze_symbol
-from data_provider import daily_history, hourly_history, intraday_5m_history
+from data_provider import daily_history, hourly_history, intraday_5m_history, latest_session_quote
 from earnings_engine import earnings_info
 from flow_engine import money_flow_metrics, rank_candidate
 from opportunity_engine import rank_opportunities
@@ -59,6 +59,9 @@ def analyze_one(symbol, benchmark_df):
     if base and flow and rank:
         record = {**base, **flow, **rank}
         record.update(overnight_metrics(daily, intra))
+        record.update(latest_session_quote(symbol))
+        if record.get("Price Used"):
+            record["Price"] = record["Price Used"]
         return apply_overnight_adjustment(record)
     return None
 

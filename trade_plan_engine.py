@@ -14,10 +14,28 @@ def technical_bottom(daily):
     e21=safe_float(ema(data["Close"],21).iloc[-1],price); low5=safe_float(data["Low"].tail(5).min(),price); low20=safe_float(data["Low"].tail(20).min(),low5)
     return {"Bottom Low":round(max(.01,min(low20,min(low5,e21)-.45*a)),2),"Bottom High":round(max(.01,min(low5,e21)),2),"Previous Day Low":round(safe_float(data["Low"].iloc[-2],low5),2)}
 
-def build_trade_plan(symbol,daily,row,mtf,horizon,x_sentiment_score=0.0,x_confidence=0.0):
+def build_trade_plan(symbol,daily,row,mtf,horizon,x_sentiment_score=0.0,x_confidence=0.0,price_context=None):
     data=ensure_ohlcv(daily)
     if data.empty or not row:return {}
-    price=safe_float(data["Close"].iloc[-1]); brain=analyze_brain(data,row,mtf,horizon); lv=brain["Levels"]; sc=brain["Scenarios"]; bottom=technical_bottom(data)
+
+    price_context = price_context or {}
+    provider_price = safe_float(price_context.get("Price Used"), np.nan)
+    daily_close = safe_float(data["Close"].iloc[-1])
+    price = provider_price if math.isfinite(provider_price) and provider_price > 0 else daily_close
+
+    # Re-anchor the latest daily bar to the newest session price so Entry/TP
+    # calculations do not silently use yesterday's close.
+    plan_data = data.copy()
+    if math.isfinite(price) and price > 0:
+        plan_data.loc[plan_data.index[-1], "Close"] = price
+        plan_data.loc[plan_data.index[-1], "High"] = max(
+            safe_float(plan_data["High"].iloc[-1], price), price
+        )
+        plan_data.loc[plan_data.index[-1], "Low"] = min(
+            safe_float(plan_data["Low"].iloc[-1], price), price
+        )
+
+    brain=analyze_brain(plan_data,row,mtf,horizon); lv=brain["Levels"]; sc=brain["Scenarios"]; bottom=technical_bottom(plan_data)
     a=max(safe_float(lv.get("ATR"),price*.025),.01); e9=safe_float(lv.get("EMA9"),price); e21=safe_float(lv.get("EMA21"),price)
     s1=safe_float(lv.get("Support 1"),min(e9,price-.4*a)); s2=safe_float(lv.get("Support 2"),min(e21,s1-.6*a))
     r1=safe_float(lv.get("Resistance 1"),price+a); r2=safe_float(lv.get("Resistance 2"),r1+a); stretch=safe_float(lv.get("Stretch"),r2+a)
@@ -71,7 +89,10 @@ def build_trade_plan(symbol,daily,row,mtf,horizon,x_sentiment_score=0.0,x_confid
         money_out>=money_in, selloff>=55, rr1>=1.0, conf>=58
     ])
 
-    if bullish_valid:
+    price_fresh = bool(price_context.get("Price Fresh", True))
+    if not price_fresh:
+        final_action="PRICE STALE — KHÔNG PHÁT PLAN MỚI"
+    elif bullish_valid:
         final_action="CANH BUY CALL — CHỈ SAU TRIGGER"
     elif bearish_valid:
         final_action="CANH BUY PUT — CHỈ SAU BREAKDOWN"
@@ -80,7 +101,13 @@ def build_trade_plan(symbol,daily,row,mtf,horizon,x_sentiment_score=0.0,x_confid
 
     sj=ZoneInfo("America/Los_Angeles")
     analysis_time=datetime.now(sj)
-    validity_days={"Day trade":0,"Ngày mai":1,"Swing 3–5 ngày":5,"Swing 1–2 tuần":14}.get(horizon,1)
+    validity_days={
+        "Day trade":0,
+        "Ngày mai":1,
+        "Swing 3–5 ngày":5,
+        "Swing 1–2 tuần":14,
+        "Swing 2–3 tháng":90,
+    }.get(horizon,1)
     valid_until=analysis_time+timedelta(days=validity_days)
 
     if bearish:
@@ -99,6 +126,14 @@ def build_trade_plan(symbol,daily,row,mtf,horizon,x_sentiment_score=0.0,x_confid
     reasons=list(brain.get("Entry Reasons",[]))+[f"Trend {trend:.0f}/100",f"Entry {entry_score:.0f}/100"]
     return {
         "Ticker":symbol,"Horizon":horizon,"Price":round(price,2),"Action":final_action,
+        "Price Session":price_context.get("Price Session","REGULAR MARKET"),
+        "Price Updated":price_context.get("Price Updated","Unknown"),
+        "Price Age Seconds":price_context.get("Price Age Seconds"),
+        "Price Fresh":price_fresh,
+        "Price Source":price_context.get("Price Source","Daily close fallback"),
+        "Price Warning":price_context.get("Price Warning",""),
+        "Money In":round(money_in,1),
+        "Money Out":round(money_out,1),
         "Analysis Time":analysis_time.strftime("%Y-%m-%d %I:%M:%S %p %Z"),
         "Valid Until":valid_until.strftime("%Y-%m-%d %I:%M %p %Z"),
         "Direction":"PUT" if bearish else "CALL",
@@ -137,8 +172,10 @@ def trade_plan_html(plan):
 @media(max-width:900px){{.grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}@media(max-width:600px){{.scores,.grid,.scenarios{{grid-template-columns:1fr}}.atlas{{padding:12px}}.title{{font-size:22px}}.value{{font-size:18px}}}}
 </style>
 <div class="atlas">
-<div class="head"><div><div class="title">{plan.get('Ticker')} — {plan.get('Horizon')}</div><div style="color:#aeb8c8;margin-top:5px">Phân tích {plan.get('Analysis Time')} • Hiệu lực đến {plan.get('Valid Until')}</div><div style="color:#aeb8c8;margin-top:5px">Giá {money('Price')} • {plan.get('Bias')} • Confidence {safe_float(plan.get('Confidence')):.0f}%</div></div><div class="action">{plan.get('Action')}</div></div>
+<div class="head"><div><div class="title">{plan.get('Ticker')} — {plan.get('Horizon')}</div><div style="color:#aeb8c8;margin-top:5px">Phân tích {plan.get('Analysis Time')} • Hiệu lực đến {plan.get('Valid Until')}</div><div style="color:#aeb8c8;margin-top:5px">Price Used {money('Price')} • Session {plan.get('Price Session')} • Updated {plan.get('Price Updated')}</div><div style="color:#aeb8c8;margin-top:5px">{plan.get('Bias')} • Confidence {safe_float(plan.get('Confidence')):.0f}%</div></div><div class="action">{plan.get('Action')}</div></div>
 <div class="scores">
+<div class="box"><div class="label">Money In</div><div class="value" style="color:#65e6a4">{safe_float(plan.get('Money In')):.1f}</div></div>
+<div class="box"><div class="label">Money Out</div><div class="value" style="color:#ff718f">{safe_float(plan.get('Money Out')):.1f}</div></div>
 <div class="box"><div class="label">Trend Score</div><div class="value">{safe_float(plan.get('Trend Score')):.0f}/100</div><div class="bar"><div class="fill" style="width:{safe_float(plan.get('Trend Score')):.0f}%"></div></div></div>
 <div class="box"><div class="label">Entry Score — {plan.get('Entry Label')}</div><div class="value">{safe_float(plan.get('Entry Score')):.0f}/100</div><div class="bar"><div class="fill" style="width:{safe_float(plan.get('Entry Score')):.0f}%"></div></div></div>
 </div>
@@ -159,5 +196,5 @@ def trade_plan_html(plan):
 <div class="box"><div class="label">Breakdown</div><div class="value">{safe_float(sc.get('Breakdown')):.0f}%</div></div>
 </div>
 <div class="plans"><div class="plan-line"><b>Plan A:</b> {plan.get('Plan A')}</div><div class="plan-line"><b>Plan B:</b> {plan.get('Plan B')}</div><div class="plan-line"><b>Plan C:</b> {plan.get('Plan C')}</div></div>
-<div class="note">{reasons}<br>TP1 là kháng cự gần; Stretch chỉ dùng khi breakout được xác nhận.</div>
+<div class="note">{html.escape(str(plan.get('Price Warning','')))}<br>{reasons}<br>TP1 là kháng cự gần theo horizon; TP2 là mục tiêu tiếp theo khi xu hướng xác nhận. Không dùng plan mới khi Price Fresh = False.</div>
 </div>"""

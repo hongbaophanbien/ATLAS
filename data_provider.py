@@ -341,3 +341,149 @@ def intraday_5m_history(symbol: str) -> pd.DataFrame:
         prepost=True,
         auto_adjust=True,
     )
+
+
+def _session_from_san_jose_timestamp(ts: pd.Timestamp) -> str:
+    """Classify a market timestamp using San Jose/Pacific trading windows."""
+    if ts is None or pd.isna(ts):
+        return "UNKNOWN"
+
+    local = pd.Timestamp(ts)
+    if local.tzinfo is None:
+        local = local.tz_localize("UTC")
+    local = local.tz_convert("America/Los_Angeles")
+
+    # Saturday/Sunday: no official US equity session.
+    if local.weekday() >= 5:
+        return "CLOSED"
+
+    minute = local.hour * 60 + local.minute
+    if 60 <= minute < 390:       # 1:00–6:30 PT = 4:00–9:30 ET
+        return "PRE-MARKET"
+    if 390 <= minute < 780:      # 6:30–13:00 PT = 9:30–16:00 ET
+        return "REGULAR MARKET"
+    if 780 <= minute < 1020:     # 13:00–17:00 PT = 16:00–20:00 ET
+        return "AFTER-HOURS"
+    return "OVERNIGHT"
+
+
+def _expected_session_now() -> str:
+    now = pd.Timestamp.now(tz="America/Los_Angeles")
+    if now.weekday() >= 5:
+        return "CLOSED"
+    minute = now.hour * 60 + now.minute
+    if 60 <= minute < 390:
+        return "PRE-MARKET"
+    if 390 <= minute < 780:
+        return "REGULAR MARKET"
+    if 780 <= minute < 1020:
+        return "AFTER-HOURS"
+    return "OVERNIGHT"
+
+
+def latest_session_quote(symbol: str) -> dict:
+    """
+    Return the latest provider-supported quote with explicit session/freshness.
+
+    Yahoo generally supplies regular, pre-market and after-hours bars. It does
+    not guarantee a complete broker-style overnight tape. During the overnight
+    window, ATLAS only labels a quote OVERNIGHT when the returned timestamp is
+    actually recent; otherwise it is marked stale instead of inventing a price.
+    """
+    symbol = symbol.strip().upper()
+    now_utc = pd.Timestamp.now(tz="UTC")
+    expected_session = _expected_session_now()
+
+    frame = download_history(
+        symbol,
+        period="1d",
+        interval="1m",
+        prepost=True,
+        auto_adjust=False,
+    )
+    source = "Yahoo 1m extended"
+
+    if frame.empty:
+        frame = download_history(
+            symbol,
+            period="5d",
+            interval="5m",
+            prepost=True,
+            auto_adjust=False,
+        )
+        source = "Yahoo 5m extended fallback"
+
+    if frame.empty:
+        return {
+            "Price Used": None,
+            "Price Session": expected_session,
+            "Price Updated": None,
+            "Price Age Seconds": None,
+            "Price Fresh": False,
+            "Price Source": source,
+            "Price Warning": "Không lấy được giá phiên hiện tại.",
+        }
+
+    close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+    if close.empty:
+        return {
+            "Price Used": None,
+            "Price Session": expected_session,
+            "Price Updated": None,
+            "Price Age Seconds": None,
+            "Price Fresh": False,
+            "Price Source": source,
+            "Price Warning": "Không có close hợp lệ.",
+        }
+
+    ts = pd.Timestamp(close.index[-1])
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    ts_utc = ts.tz_convert("UTC")
+    ts_sj = ts_utc.tz_convert("America/Los_Angeles")
+    age_seconds = max(0.0, (now_utc - ts_utc).total_seconds())
+    actual_session = _session_from_san_jose_timestamp(ts_utc)
+
+    thresholds = {
+        "REGULAR MARKET": 120,
+        "PRE-MARKET": 180,
+        "AFTER-HOURS": 180,
+        "OVERNIGHT": 300,
+        "CLOSED": 900,
+        "UNKNOWN": 180,
+    }
+    threshold = thresholds.get(expected_session, 180)
+
+    # A quote is fresh only when its timestamp belongs to the current session
+    # and falls inside the session-specific age threshold.
+    session_matches = (
+        actual_session == expected_session
+        or (expected_session == "CLOSED" and actual_session in {
+            "REGULAR MARKET", "AFTER-HOURS", "PRE-MARKET"
+        })
+    )
+    fresh = bool(session_matches and age_seconds <= threshold)
+
+    warning = ""
+    if expected_session == "OVERNIGHT" and not fresh:
+        warning = (
+            "Nguồn miễn phí không trả tape overnight đủ mới; "
+            "ATLAS không dùng giá cũ để phát plan mới."
+        )
+    elif not fresh:
+        warning = (
+            f"Giá {actual_session} đã cũ so với phiên {expected_session}; "
+            "không phát plan mới."
+        )
+
+    return {
+        "Price Used": round(float(close.iloc[-1]), 4),
+        "Price Session": actual_session,
+        "Expected Session": expected_session,
+        "Price Updated": ts_sj.strftime("%Y-%m-%d %I:%M:%S %p %Z"),
+        "Price Updated ISO": ts_utc.isoformat(),
+        "Price Age Seconds": round(age_seconds, 1),
+        "Price Fresh": fresh,
+        "Price Source": source,
+        "Price Warning": warning,
+    }

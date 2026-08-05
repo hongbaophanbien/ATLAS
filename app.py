@@ -18,6 +18,7 @@ from data_provider import (
     intraday_5m_history,
     online_status,
     get_data_error,
+    latest_session_quote,
 )
 from earnings_engine import earnings_info, lotto_label
 from flow_engine import market_pulse, money_flow_metrics, rank_candidate
@@ -52,7 +53,7 @@ from snapshot_store import (
 )
 
 
-APP_TITLE = "ATLAS X 2.1 — COMPLETE MARKET UPDATE"
+APP_TITLE = "ATLAS X 2.2 — SESSION PRICE + UNIFIED TRADE PLAN"
 SAN_JOSE_TZ = ZoneInfo("America/Los_Angeles")
 DEFAULT = ['AAPL', 'ABBV', 'ADBE', 'ALAB', 'AMD', 'AMAT', 'AMZN', 'ARKX', 'ARM', 'ASML', 'ASTS', 'AVGO', 'BA', 'BAC', 'BE', 'BWXT', 'CAT', 'CCJ', 'CIBR', 'COP', 'CRM', 'CRWD', 'CVX', 'DELL', 'FTNT', 'GLW', 'GOOG', 'GOOGL', 'GS', 'IBM', 'IGV', 'INTC', 'IONQ', 'IWM', 'JNJ', 'JPM', 'KLAC', 'LEU', 'LLY', 'LRCX', 'LUNR', 'META', 'MP', 'MRK', 'MRVL', 'MS', 'MSFT', 'MU', 'NBIS', 'NOW', 'NVDA', 'OKLO', 'OKTA', 'ORCL', 'OXY', 'PANW', 'PLTR', 'POWL', 'QCOM', 'QBTS', 'QQQ', 'QUBT', 'RDW', 'RGTI', 'RKLB', 'SLB', 'SMCI', 'SMH', 'SMR', 'SNDK', 'SOXX', 'SPCX', 'SPY', 'TSLA', 'TSM', 'UNH', 'URA', 'USAR', 'UUUU', 'VRT', 'WDC', 'WFC', 'XLE', 'XLF', 'XLI', 'XLV', 'XOM', 'ZS']
 
@@ -122,6 +123,11 @@ def get_intraday(symbol: str):
 @st.cache_data(ttl=900, show_spinner=False)
 def get_earnings(symbol: str):
     return earnings_info(symbol)
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def get_latest_session_quote(symbol: str):
+    return latest_session_quote(symbol)
 
 
 def sj_now():
@@ -1083,7 +1089,6 @@ tabs = st.tabs([
     "ATLAS BOT",
     "Sector Rotation",
     "Theme Rooms",
-    "Signal Fusion",
     "Trade Plan",
     "Top CALL / PUT",
     "FLOW RADAR",
@@ -1132,6 +1137,7 @@ def run_full_scan():
 with tabs[0]:
     st.subheader("🏠 ATLAS HOME")
 
+    # Bảng 1: Option Shortlist luôn được ưu tiên ở đầu HOME.
     home_opportunities = st.session_state.get("opportunities", pd.DataFrame())
     render_option_shortlist(
         home_opportunities,
@@ -1139,27 +1145,21 @@ with tabs[0]:
         table_height=430,
     )
 
-    now = sj_now()
-    compact_status_strip([
-        ("San Jose", now.strftime("%I:%M:%S %p")),
-        ("Market mode", market_mode(now)),
-        ("Watchlist", len(symbols)),
-        ("Last scan", st.session_state.get("scan_time", "Never")),
-    ])
+    # Snapshot-first startup. Never run a direct 88-ticker scan on app open.
+    if "atlas_snapshot_boot_attempted" not in st.session_state:
+        st.session_state["atlas_snapshot_boot_attempted"] = True
+        if snapshot_configured():
+            loaded = load_background_snapshot_into_session()
+            st.session_state["atlas_snapshot_boot_loaded"] = bool(loaded)
+        else:
+            st.session_state["atlas_snapshot_boot_loaded"] = False
 
-    if st.session_state.get("loaded_background_snapshot"):
-        st.success(
-            "Background Snapshot đang hoạt động. "
-            "App đang đọc kết quả đã quét sẵn."
-        )
-    elif not snapshot_configured():
-        st.warning(
-            "Background Snapshot chưa cấu hình. "
-            "Hiện app vẫn phải quét trực tiếp."
-        )
+    scan = st.session_state.get("scan", pd.DataFrame())
+    rotation = st.session_state.get("rotation", pd.DataFrame())
+    opportunities = st.session_state.get("opportunities", pd.DataFrame())
 
-    scan_now = st.session_state.get("scan", pd.DataFrame())
-    opportunities_now = st.session_state.get("opportunities", pd.DataFrame())
+    scan_now = scan
+    opportunities_now = opportunities
     requested_count = int(
         st.session_state.get("snapshot_watchlist_count", len(symbols))
     )
@@ -1182,30 +1182,6 @@ with tabs[0]:
         )
     )
 
-    compact_status_strip([
-        ("Yêu cầu quét", requested_count),
-        ("Đã phân tích", scanned_count),
-        ("Đủ chuẩn", qualified_count),
-        ("Ẩn / lỗi", hidden_count + failed_count),
-    ])
-    st.caption(
-        "Top Opportunities chỉ hiện mã vượt bộ lọc. "
-        "Các mã còn lại vẫn được quét nhưng không đủ chuẩn để khuyến nghị."
-    )
-
-    # Snapshot-first startup. Never run a direct 88-ticker scan on app open.
-    if "atlas_snapshot_boot_attempted" not in st.session_state:
-        st.session_state["atlas_snapshot_boot_attempted"] = True
-        if snapshot_configured():
-            loaded = load_background_snapshot_into_session()
-            st.session_state["atlas_snapshot_boot_loaded"] = bool(loaded)
-        else:
-            st.session_state["atlas_snapshot_boot_loaded"] = False
-
-    scan = st.session_state.get("scan", pd.DataFrame())
-    rotation = st.session_state.get("rotation", pd.DataFrame())
-    opportunities = st.session_state.get("opportunities", pd.DataFrame())
-
     if scan.empty:
         if snapshot_configured():
             error_text = st.session_state.get("snapshot_error", "")
@@ -1225,6 +1201,56 @@ with tabs[0]:
                 "ATLAS không quét trực tiếp để tránh chờ lâu trên điện thoại."
             )
     else:
+        # Bảng 2: Top Opportunities nằm ngay sau Option Shortlist.
+        st.markdown("### 🔥 Top Opportunities")
+        if opportunities.empty:
+            st.warning("Không có setup đạt chuẩn A/B. Không ép giao dịch.")
+        else:
+            cols = [
+                "Ticker", "Action", "Opportunity Score", "Price",
+                "Money In", "Money Out", "Net Flow", "MTF Score",
+                "Pullback Risk", "Sell-off Risk", "Reasons",
+            ]
+            show_global_table(
+                opportunities[[c for c in cols if c in opportunities.columns]],
+                height=500,
+                sticky_columns=("Ticker",),
+            )
+
+        # Thông tin phụ chuyển xuống cuối HOME.
+        st.divider()
+        st.markdown("### System & Market Overview")
+
+        now = sj_now()
+        compact_status_strip([
+            ("San Jose", now.strftime("%I:%M:%S %p")),
+            ("Market mode", market_mode(now)),
+            ("Watchlist", len(symbols)),
+            ("Last scan", st.session_state.get("scan_time", "Never")),
+        ])
+
+        if st.session_state.get("loaded_background_snapshot"):
+            st.success(
+                "Background Snapshot đang hoạt động. "
+                "App đang đọc kết quả đã quét sẵn."
+            )
+        elif not snapshot_configured():
+            st.warning(
+                "Background Snapshot chưa cấu hình. "
+                "Hiện app vẫn phải quét trực tiếp."
+            )
+
+        compact_status_strip([
+            ("Yêu cầu quét", requested_count),
+            ("Đã phân tích", scanned_count),
+            ("Đủ chuẩn", qualified_count),
+            ("Ẩn / lỗi", hidden_count + failed_count),
+        ])
+        st.caption(
+            "Top Opportunities chỉ hiện mã vượt bộ lọc. "
+            "Các mã còn lại vẫn được quét nhưng không đủ chuẩn để khuyến nghị."
+        )
+
         pulse = market_pulse(scan)
         compact_status_strip([
             ("Regime", pulse.get("Regime")),
@@ -1233,21 +1259,6 @@ with tabs[0]:
             ("Breadth", f"{pulse.get('Breadth Up %',0):.0f}%"),
         ])
         st.info(build_market_narrative(scan, rotation))
-
-        st.markdown("### 🔥 Top Opportunities")
-        if opportunities.empty:
-            st.warning("Không có setup đạt chuẩn A/B. Không ép giao dịch.")
-        else:
-            cols = [
-                "Ticker","Action","Conviction","Opportunity Score","Price",
-                "Money In","Money Out","Net Flow","MTF Score","Pullback Risk",
-                "Sell-off Risk","Reasons"
-            ]
-            show_global_table(
-                opportunities[[c for c in cols if c in opportunities.columns]],
-                height=500,
-                sticky_columns=("Ticker",),
-            )
 
 
 
@@ -1306,7 +1317,7 @@ with tabs[2]:
                 st.warning(text)
 
 
-with tabs[12]:
+with tabs[7]:
     st.subheader("📅 Earnings Radar — 14 ngày")
     st.caption(
         "Tự động chỉ hiện mã có ER trong 14 ngày. "
@@ -1404,58 +1415,29 @@ with tabs[4]:
 
 
 with tabs[5]:
-    st.subheader("Signal Fusion — tự cập nhật")
+    st.subheader("Trade Plan — Signal Fusion hợp nhất")
     scan = st.session_state.get("scan", pd.DataFrame())
     snapshot_symbols = scan["Ticker"].tolist() if not scan.empty else []
     options = list(dict.fromkeys(symbols + snapshot_symbols))
-    ticker = st.selectbox("Ticker", options, key="fusion_ticker")
-    if ticker not in snapshot_symbols:
-        st.info(f"{ticker}: PENDING FIRST SCAN")
-    horizon = st.selectbox(
-        "Horizon",
-        ["Day trade","Ngày mai","Swing 3–5 ngày","Swing 1–2 tuần"],
-        index=1,
-        key="fusion_horizon",
-    )
-    daily = get_daily(ticker)
-    intraday = get_intraday(ticker)
-    benchmark_df = get_daily(benchmark)
-    base, mtf = analyze_symbol(ticker, daily, intraday, benchmark_df, 50.0)
-    flow = money_flow_metrics(daily, intraday)
+    ticker = st.selectbox("Ticker", options, key="unified_plan_ticker")
 
-    if base and flow:
-        base.update(flow)
-        analyst = {}
-        plan = build_trade_plan(ticker, daily, base, mtf, horizon)
-        fusion = signal_fusion(base, flow, plan, analyst)
-        retest = analyze_retest(daily, base)
-
-        components.html(
-            signal_fusion_html(ticker, plan, fusion, retest, base, flow),
-            height=720,
-            scrolling=True,
-        )
-        components.html(trade_plan_html(plan), height=1180, scrolling=True)
-    else:
-        st.warning("Không đủ dữ liệu.")
-
-
-with tabs[6]:
-    st.subheader("Trade Plan — tự hiện")
-    scan = st.session_state.get("scan", pd.DataFrame())
-    snapshot_symbols = scan["Ticker"].tolist() if not scan.empty else []
-    options = list(dict.fromkeys(symbols + snapshot_symbols))
-    ticker = st.selectbox("Ticker", options, key="plan_ticker")
     if ticker not in snapshot_symbols:
         st.info(
-            f"{ticker}: PENDING FIRST SCAN — mã đã có trong Trade Plan và sẽ "
-            "được Background Worker ưu tiên ở chu kỳ tiếp theo."
+            f"{ticker}: PENDING FIRST SCAN — worker sẽ ưu tiên mã này "
+            "ở chu kỳ kế tiếp."
         )
+
     horizon = st.selectbox(
         "Horizon",
-        ["Day trade","Ngày mai","Swing 3–5 ngày","Swing 1–2 tuần"],
+        [
+            "Day trade",
+            "Ngày mai",
+            "Swing 3–5 ngày",
+            "Swing 1–2 tuần",
+            "Swing 2–3 tháng",
+        ],
         index=1,
-        key="plan_horizon",
+        key="unified_plan_horizon",
     )
 
     daily = get_daily(ticker)
@@ -1463,20 +1445,49 @@ with tabs[6]:
     benchmark_df = get_daily(benchmark)
     base, mtf = analyze_symbol(ticker, daily, intraday, benchmark_df, 50.0)
     flow = money_flow_metrics(daily, intraday)
+    price_context = get_latest_session_quote(ticker)
 
     if base and flow:
         base.update(flow)
-        plan = build_trade_plan(ticker, daily, base, mtf, horizon)
-        components.html(trade_plan_html(plan), height=1050, scrolling=True)
+        plan = build_trade_plan(
+            ticker,
+            daily,
+            base,
+            mtf,
+            horizon,
+            price_context=price_context,
+        )
+        fusion = signal_fusion(base, flow, plan, {})
+        retest = analyze_retest(daily, base)
+
+        # Keep the full Signal Fusion information, then the concrete plan.
+        components.html(
+            signal_fusion_html(ticker, plan, fusion, retest, base, flow),
+            height=760,
+            scrolling=True,
+        )
+        components.html(
+            trade_plan_html(plan),
+            height=1320,
+            scrolling=True,
+        )
+
         frame, label = select_chart_frame(daily, intraday, "4H")
         if not frame.empty:
             st.plotly_chart(
-                make_analysis_chart(frame, f"{ticker} — {label}", bars=180, show_vwap=True),
+                make_analysis_chart(
+                    frame,
+                    f"{ticker} — {label}",
+                    bars=180,
+                    show_vwap=True,
+                ),
                 use_container_width=True,
             )
+    else:
+        st.warning("Không đủ dữ liệu để xây dựng Trade Plan.")
 
 
-with tabs[7]:
+with tabs[6]:
     st.subheader("Top CALL / PUT")
     scan = st.session_state.get("scan", pd.DataFrame())
 
@@ -1564,7 +1575,7 @@ Hệ thống chưa biết chắc giao dịch là opening, closing, hedge hay spr
 
 
 
-with tabs[8]:
+with tabs[7]:
     st.subheader("🌊 FLOW RADAR — Notable Option Activity")
     st.caption(
         "Được tính bởi GitHub Background Scanner và đọc từ snapshot. "
@@ -1702,7 +1713,7 @@ with tabs[8]:
 
 
 
-with tabs[9]:
+with tabs[7]:
     st.subheader("Watch Engine")
     scan = st.session_state.get("scan", pd.DataFrame())
     watch = build_watch_actions(scan, personal_watch)
@@ -1717,7 +1728,7 @@ with tabs[9]:
 
 
 
-with tabs[10]:
+with tabs[7]:
     st.subheader("🧠 AI SEMI ONLY — CALL / PUT COMMAND CENTER")
     st.caption(
         "Chỉ phân tích nhóm AI–Semiconductor. "
@@ -1832,7 +1843,7 @@ with tabs[10]:
 
 
 
-with tabs[11]:
+with tabs[7]:
     st.subheader("🩺 System Health — Always-On Scanner")
 
     freshness = snapshot_freshness(
