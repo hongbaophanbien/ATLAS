@@ -1317,7 +1317,7 @@ with tabs[2]:
                 st.warning(text)
 
 
-with tabs[7]:
+with tabs[11]:
     st.subheader("📅 Earnings Radar — 14 ngày")
     st.caption(
         "Tự động chỉ hiện mã có ER trong 14 ngày. "
@@ -1717,7 +1717,7 @@ with tabs[7]:
 
 
 
-with tabs[7]:
+with tabs[8]:
     st.subheader("Watch Engine")
     scan = st.session_state.get("scan", pd.DataFrame())
     watch = build_watch_actions(scan, personal_watch)
@@ -1732,7 +1732,7 @@ with tabs[7]:
 
 
 
-with tabs[7]:
+with tabs[9]:
     st.subheader("🧠 AI SEMI ONLY — CALL / PUT COMMAND CENTER")
     st.caption(
         "Chỉ phân tích nhóm AI–Semiconductor. "
@@ -1847,7 +1847,7 @@ with tabs[7]:
 
 
 
-with tabs[7]:
+with tabs[10]:
     st.subheader("🩺 System Health — Always-On Scanner")
 
     freshness = snapshot_freshness(
