@@ -107,8 +107,8 @@ def _expirations(ticker: yf.Ticker, min_dte: int = 7, max_dte: int = 120, limit:
 
 def scan_symbol_flow(
     row: pd.Series,
-    max_expirations: int = 3,
-    contracts_per_side: int = 2,
+    max_expirations: int = 4,
+    contracts_per_side: int = 3,
 ) -> list[dict]:
     symbol = str(row.get("Ticker", "")).strip().upper()
     spot = _safe(row.get("Price"), 0.0)
@@ -183,12 +183,14 @@ def scan_symbol_flow(
                     + alignment_points
                 )
 
-                # Hard filters remove illiquid far-tail contracts.
-                if spread > 35 or oi < 10:
+                # Practical free-data filters. Yahoo may return sparse OI or
+                # temporarily wider spreads outside regular hours. Keep usable
+                # contracts instead of dropping the entire Flow Radar.
+                if spread > 55 or oi < 5:
                     continue
-                if abs(moneyness) > 35 and abs_delta < 0.12:
+                if abs(moneyness) > 45 and abs_delta < 0.08:
                     continue
-                if premium_proxy < 25_000:
+                if premium_proxy < 10_000:
                     continue
 
                 candidates.append({

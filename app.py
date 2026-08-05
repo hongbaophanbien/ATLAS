@@ -1137,15 +1137,8 @@ def run_full_scan():
 with tabs[0]:
     st.subheader("🏠 ATLAS HOME")
 
-    # Bảng 1: Option Shortlist luôn được ưu tiên ở đầu HOME.
-    home_opportunities = st.session_state.get("opportunities", pd.DataFrame())
-    render_option_shortlist(
-        home_opportunities,
-        option_budget,
-        table_height=430,
-    )
-
-    # Snapshot-first startup. Never run a direct 88-ticker scan on app open.
+    # Load snapshot before rendering anything so the market narrative can be
+    # the first live item shown on HOME.
     if "atlas_snapshot_boot_attempted" not in st.session_state:
         st.session_state["atlas_snapshot_boot_attempted"] = True
         if snapshot_configured():
@@ -1157,6 +1150,18 @@ with tabs[0]:
     scan = st.session_state.get("scan", pd.DataFrame())
     rotation = st.session_state.get("rotation", pd.DataFrame())
     opportunities = st.session_state.get("opportunities", pd.DataFrame())
+
+    # Market Summary blue bar is intentionally the first content on HOME.
+    if not scan.empty:
+        st.info(build_market_narrative(scan, rotation))
+
+    # Bảng 1: Option Shortlist.
+    home_opportunities = opportunities
+    render_option_shortlist(
+        home_opportunities,
+        option_budget,
+        table_height=430,
+    )
 
     scan_now = scan
     opportunities_now = opportunities
@@ -1258,7 +1263,6 @@ with tabs[0]:
             ("Risk", f"{pulse.get('Risk Level',0):.0f}"),
             ("Breadth", f"{pulse.get('Breadth Up %',0):.0f}%"),
         ])
-        st.info(build_market_narrative(scan, rotation))
 
 
 

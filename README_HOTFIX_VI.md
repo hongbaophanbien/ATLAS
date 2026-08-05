@@ -1,37 +1,33 @@
-# ATLAS Flow Radar Tab Index Hotfix
-
-## Nguyên nhân
-
-Sau khi gộp `Signal Fusion` và `Trade Plan`, việc giảm số thứ tự tab đã bị áp dụng lặp.
-Kết quả là nhiều module cùng bị gán vào `tabs[7]`:
-
-- FLOW RADAR
-- Watch Engine
-- AI SEMI ONLY
-- System Health
-- Earnings 14D
-
-Vì vậy toàn bộ nội dung bị dồn vào FLOW RADAR.
+# ATLAS — HOME Summary Top + Flow Contract Restore
 
 ## Đã sửa
 
-Khôi phục đúng thứ tự:
+### HOME
+- Dòng Market Summary màu xanh được chuyển lên ngay dưới tiêu đề HOME.
+- Nó xuất hiện trước Option Shortlist và Top Opportunities.
+- Xóa bản lặp lại ở cuối HOME.
 
-0. HOME
-1. FAST PICKS
-2. ATLAS BOT
-3. Sector Rotation
-4. Theme Rooms
-5. Trade Plan
-6. Top CALL / PUT
-7. FLOW RADAR
-8. Watch Engine
-9. AI SEMI ONLY
-10. System Health
-11. Earnings 14D
+### FLOW RADAR
+- Retry option-chain 2 lần cho nhóm Primary.
+- Retry option-chain 2 lần cho nhóm Fallback.
+- Nới bộ lọc vừa phải để Yahoo extended-hours không làm mất toàn bộ contract:
+  - spread tối đa 55%
+  - OI tối thiểu 5
+  - premium proxy tối thiểu $10,000
+- Quét tối đa 4 expiration và 3 contract mỗi phía.
+- Nếu Yahoo tạm thời trả rỗng, ATLAS giữ lại Flow Radar hợp lệ của snapshot trước,
+  thay vì ghi đè thành Contracts found = 0.
 
-## Cập nhật
+## File cần upload
 
-Chỉ cần upload và thay thế `app.py` trong thư mục gốc GitHub ATLAS, rồi commit vào `main`.
+1. `app.py`
+2. `background_scan.py`
+3. `option_flow_radar.py`
 
-Worker 60 giây không cần khởi động lại.
+Upload vào thư mục gốc GitHub ATLAS và Replace file cũ.
+
+## Sau khi upload
+
+1. Commit vào `main`.
+2. Chạy GitHub Action thủ công một lần.
+3. Trên máy local, copy cùng 3 file rồi khởi động lại worker để worker dùng logic mới.
