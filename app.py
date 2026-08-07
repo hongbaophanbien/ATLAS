@@ -53,7 +53,7 @@ from snapshot_store import (
 )
 
 
-APP_TITLE = "ATLAS X 2.2 — SESSION PRICE + UNIFIED TRADE PLAN"
+APP_TITLE = "ATLAS X 2.3 — ENTRY RADAR + MOBILE PERFORMANCE"
 SAN_JOSE_TZ = ZoneInfo("America/Los_Angeles")
 DEFAULT = ['AAPL', 'ABBV', 'ADBE', 'ALAB', 'AMD', 'AMAT', 'AMZN', 'ARKX', 'ARM', 'ASML', 'ASTS', 'AVGO', 'BA', 'BAC', 'BE', 'BWXT', 'CAT', 'CCJ', 'CIBR', 'COP', 'CRM', 'CRWD', 'CVX', 'DELL', 'FTNT', 'GLW', 'GOOG', 'GOOGL', 'GS', 'IBM', 'IGV', 'INTC', 'IONQ', 'IWM', 'JNJ', 'JPM', 'KLAC', 'LEU', 'LLY', 'LRCX', 'LUNR', 'META', 'MP', 'MRK', 'MRVL', 'MS', 'MSFT', 'MU', 'NBIS', 'NOW', 'NVDA', 'OKLO', 'OKTA', 'ORCL', 'OXY', 'PANW', 'PLTR', 'POWL', 'QCOM', 'QBTS', 'QQQ', 'QUBT', 'RDW', 'RGTI', 'RKLB', 'SLB', 'SMCI', 'SMH', 'SMR', 'SNDK', 'SOXX', 'SPCX', 'SPY', 'TSLA', 'TSM', 'UNH', 'URA', 'USAR', 'UUUU', 'VRT', 'WDC', 'WFC', 'XLE', 'XLF', 'XLI', 'XLV', 'XOM', 'ZS']
 
@@ -128,6 +128,11 @@ def get_earnings(symbol: str):
 @st.cache_data(ttl=45, show_spinner=False)
 def get_latest_session_quote(symbol: str):
     return latest_session_quote(symbol)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_online_status_cached():
+    return online_status()
 
 
 def sj_now():
@@ -460,8 +465,8 @@ def _global_table_value(column, value):
     }
     signed_columns = {"Net Flow", "Rotation"}
     one_decimal_columns = {
-        "RSI14", "Trade Score", "Opportunity Score", "Money In",
-        "Money Out", "MTF Score", "MTF", "Trend", "Call Score",
+        "RSI14", "RSI", "Trade Score", "Opportunity Score", "Money In",
+        "Money Out", "MTF Score", "MTF", "Trend", "Trend Score", "Entry Score", "Call Score",
         "Put Score", "Contract Score", "Stock Confidence", "Flow Score",
         "Delta", "Theta/day",
     }
@@ -722,6 +727,167 @@ def prepare_main_decision_frame(frame):
         "ER Date", "ER Guidance", "Source",
     ]
     return output.drop(columns=[c for c in drop_columns if c in output.columns])
+
+
+
+ENTRY_RADAR_COLUMNS = [
+    "Ticker", "Price", "Call Zone", "Distance", "Money In", "Money Out",
+    "RSI", "Trend Score", "Entry Score", "Setup", "Reason", "TP1",
+]
+
+
+def _radar_num(value, default=np.nan):
+    try:
+        value = float(value)
+        return value if np.isfinite(value) else default
+    except Exception:
+        return default
+
+
+def build_entry_radar(scan):
+    """Build a snapshot-only CALL radar across the entire persistent watchlist."""
+    if scan is None or scan.empty:
+        return pd.DataFrame(columns=ENTRY_RADAR_COLUMNS)
+
+    rows = []
+    for _, source in scan.iterrows():
+        r = source.to_dict()
+        ticker = str(r.get("Ticker", "") or "").upper().strip()
+        price = _radar_num(r.get("Price"))
+        low = _radar_num(r.get("Buy Zone Low", r.get("Entry Low")))
+        high = _radar_num(r.get("Buy Zone High", r.get("Entry High")))
+        money_in = _radar_num(r.get("Money In"), 50.0)
+        money_out = _radar_num(r.get("Money Out"), 50.0)
+        rsi = _radar_num(r.get("RSI14"), 50.0)
+        trend = _radar_num(r.get("Trend Score", r.get("MTF Score")), 50.0)
+        entry = _radar_num(r.get("Entry Score", r.get("Trade Score")), 50.0)
+        call_score = _radar_num(r.get("Call Score"), 50.0)
+        put_score = _radar_num(r.get("Put Score"), 50.0)
+        tp1 = _radar_num(r.get("TP1", r.get("Sell Zone 1")))
+        pullback = _radar_num(r.get("Pullback Risk"), 50.0)
+        selloff = _radar_num(r.get("Sell-off Risk"), 50.0)
+
+        if not ticker or not np.isfinite(price) or price <= 0:
+            continue
+
+        if np.isfinite(low) and np.isfinite(high):
+            if high < low:
+                low, high = high, low
+            call_zone = f"${low:,.2f}–${high:,.2f}"
+            if low <= price <= high:
+                distance_value = 0.0
+                distance = "🟢 IN ZONE"
+                zone_rank = 0
+            elif price > high:
+                distance_value = (price / high - 1.0) * 100.0 if high > 0 else 999.0
+                distance = f"{'🟡' if distance_value <= 2 else '🔴'} +{distance_value:.1f}%"
+                zone_rank = 1 if distance_value <= 2 else 2
+            else:
+                distance_value = (low / price - 1.0) * 100.0 if price > 0 else 999.0
+                distance = f"{'🟡' if distance_value <= 2 else '🔴'} {distance_value:.1f}% BELOW"
+                zone_rank = 1 if distance_value <= 2 else 3
+        else:
+            call_zone = "—"
+            distance_value = 999.0
+            distance = "—"
+            zone_rank = 4
+
+        bullish_flow = money_in > money_out and money_in >= 55
+        call_valid = call_score >= put_score and selloff < 65
+
+        if not call_valid or (money_out >= money_in + 10 and selloff >= 58):
+            setup = "🔴 CALL INVALID"
+            setup_rank = 5
+        elif rsi >= 72 or pullback >= 68:
+            setup = "🟠 WAIT COOL"
+            setup_rank = 4
+        elif zone_rank == 0 and bullish_flow and entry >= 60:
+            setup = "🟢 RETEST CALL"
+            setup_rank = 0
+        elif zone_rank == 1 and bullish_flow:
+            setup = "🔵 WAIT RETEST"
+            setup_rank = 1
+        elif zone_rank >= 2 and price > high if np.isfinite(high) else False:
+            setup = "⚪ NO CHASE"
+            setup_rank = 3
+        elif bullish_flow and trend >= 65 and call_score >= 65:
+            setup = "🟣 BREAKOUT CALL"
+            setup_rank = 2
+        else:
+            setup = "🔵 WAIT RETEST"
+            setup_rank = 2
+
+        reasons = []
+        if money_in >= 65 and money_in > money_out:
+            reasons.append("Money In mạnh")
+        if zone_rank == 0:
+            reasons.append("IN CALL ZONE")
+        elif zone_rank == 1:
+            reasons.append("gần Call Zone")
+        elif zone_rank >= 2 and np.isfinite(high) and price > high:
+            reasons.append("giá xa Call Zone")
+        if 42 <= rsi <= 65:
+            reasons.append("RSI đẹp")
+        elif rsi >= 72:
+            reasons.append("RSI nóng")
+        if trend >= 65:
+            reasons.append("Trend mạnh")
+        if entry >= 70:
+            reasons.append("Entry tốt")
+        elif entry < 45:
+            reasons.append("Entry thấp")
+        if selloff >= 60:
+            reasons.append("Sell-off risk cao")
+        if not reasons:
+            reasons.append("chờ xác nhận thêm")
+
+        # CALL quality is a ranking aid, not a guaranteed win probability.
+        quality = (
+            max(0.0, min(100.0, call_score)) * 0.28
+            + max(0.0, min(100.0, money_in)) * 0.22
+            + max(0.0, min(100.0, trend)) * 0.20
+            + max(0.0, min(100.0, entry)) * 0.18
+            + max(0.0, min(100.0, 100.0 - pullback)) * 0.07
+            + max(0.0, min(100.0, 100.0 - selloff)) * 0.05
+        )
+        quality -= max(0.0, rsi - 70.0) * 1.2
+        quality -= min(distance_value if np.isfinite(distance_value) else 20.0, 20.0) * 1.0
+        quality = max(0.0, min(100.0, quality))
+
+        rows.append({
+            "Ticker": ticker,
+            "Price": price,
+            "Call Zone": call_zone,
+            "Distance": distance,
+            "Money In": round(money_in, 1),
+            "Money Out": round(money_out, 1),
+            "RSI": round(rsi, 1),
+            "Trend Score": round(trend, 1),
+            "Entry Score": round(entry, 1),
+            "Setup": setup,
+            "Reason": " • ".join(reasons[:4]),
+            "TP1": tp1 if np.isfinite(tp1) else np.nan,
+            "_setup_rank": setup_rank,
+            "_zone_rank": zone_rank,
+            "_distance": distance_value,
+            "_quality": quality,
+        })
+
+    radar = pd.DataFrame(rows)
+    if radar.empty:
+        return radar
+
+    return radar.sort_values(
+        ["_setup_rank", "_zone_rank", "_quality", "Money In", "Entry Score", "Trend Score"],
+        ascending=[True, True, False, False, False, False],
+        kind="stable",
+    ).reset_index(drop=True)
+
+
+def entry_radar_display_frame(radar):
+    if radar is None or radar.empty:
+        return pd.DataFrame(columns=ENTRY_RADAR_COLUMNS)
+    return radar[[c for c in ENTRY_RADAR_COLUMNS if c in radar.columns]].copy()
 
 
 THEME_ROOM_COLUMNS = [
@@ -1073,7 +1239,7 @@ with st.sidebar:
     if sync_message:
         st.caption(sync_message)
 
-    status = online_status()
+    status = get_online_status_cached()
     if status.get("online"):
         st.success("🟢 Data online")
     else:
@@ -1086,6 +1252,7 @@ with st.sidebar:
 tabs = st.tabs([
     "HOME",
     "FAST PICKS",
+    "🎯 ENTRY RADAR",
     "ATLAS BOT",
     "Sector Rotation",
     "Theme Rooms",
@@ -1095,7 +1262,6 @@ tabs = st.tabs([
     "Watch Engine",
     "AI SEMI ONLY",
     "System Health",
-    "Earnings 14D",
 ])
 
 @st.fragment(run_every="60s")
@@ -1137,8 +1303,15 @@ def run_full_scan():
 with tabs[0]:
     st.subheader("🏠 ATLAS HOME")
 
-    # Load snapshot before rendering anything so the market narrative can be
-    # the first live item shown on HOME.
+    # Bảng 1: Option Shortlist luôn được ưu tiên ở đầu HOME.
+    home_opportunities = st.session_state.get("opportunities", pd.DataFrame())
+    render_option_shortlist(
+        home_opportunities,
+        option_budget,
+        table_height=430,
+    )
+
+    # Snapshot-first startup. Never run a direct 88-ticker scan on app open.
     if "atlas_snapshot_boot_attempted" not in st.session_state:
         st.session_state["atlas_snapshot_boot_attempted"] = True
         if snapshot_configured():
@@ -1150,18 +1323,6 @@ with tabs[0]:
     scan = st.session_state.get("scan", pd.DataFrame())
     rotation = st.session_state.get("rotation", pd.DataFrame())
     opportunities = st.session_state.get("opportunities", pd.DataFrame())
-
-    # Market Summary blue bar is intentionally the first content on HOME.
-    if not scan.empty:
-        st.info(build_market_narrative(scan, rotation))
-
-    # Bảng 1: Option Shortlist.
-    home_opportunities = opportunities
-    render_option_shortlist(
-        home_opportunities,
-        option_budget,
-        table_height=430,
-    )
 
     scan_now = scan
     opportunities_now = opportunities
@@ -1263,6 +1424,7 @@ with tabs[0]:
             ("Risk", f"{pulse.get('Risk Level',0):.0f}"),
             ("Breadth", f"{pulse.get('Breadth Up %',0):.0f}%"),
         ])
+        st.info(build_market_narrative(scan, rotation))
 
 
 
@@ -1276,7 +1438,8 @@ with tabs[1]:
     if opportunities.empty:
         st.info("Chưa có dữ liệu hoặc không có setup đủ chuẩn.")
     else:
-        enriched = prepare_main_decision_frame(enrich_earnings(opportunities))
+        # Snapshot-only rendering: do not call earnings APIs while opening the tab.
+        enriched = prepare_main_decision_frame(opportunities)
         if "Days to ER" in enriched.columns:
             enriched = enriched[
                 enriched["Days to ER"].isna() | (enriched["Days to ER"] > 2)
@@ -1297,6 +1460,72 @@ with tabs[1]:
 
 
 with tabs[2]:
+    st.subheader("🎯 ENTRY RADAR — toàn bộ Watchlist")
+    st.caption(
+        "Quét 100% dữ liệu Watchlist trong Background Snapshot và xếp hạng "
+        "cơ hội CALL. Ticker luôn được giữ cố định khi kéo ngang."
+    )
+
+    if st.session_state.get("scan", pd.DataFrame()).empty and snapshot_configured():
+        load_background_snapshot_into_session()
+
+    scan = st.session_state.get("scan", pd.DataFrame())
+    radar = build_entry_radar(scan)
+
+    if radar.empty:
+        st.info("Chưa có dữ liệu Entry Radar. Hãy kiểm tra Background Snapshot.")
+    else:
+        ready_count = int(radar["Setup"].astype(str).str.contains("RETEST CALL").sum())
+        near_count = int(radar["Setup"].astype(str).str.contains("WAIT RETEST").sum())
+        no_chase_count = int(radar["Setup"].astype(str).str.contains("NO CHASE").sum())
+        invalid_count = int(radar["Setup"].astype(str).str.contains("CALL INVALID").sum())
+
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Watchlist", len(radar))
+        s2.metric("READY", ready_count)
+        s3.metric("WAIT / NEAR", near_count)
+        s4.metric("NO CHASE", no_chase_count)
+        s5.metric("INVALID", invalid_count)
+
+        best = radar.iloc[0]
+        st.markdown(
+            f"### ⭐ Today's Opportunity: {best['Ticker']} — {best['Setup']}"
+        )
+        st.caption(
+            f"Money In {best['Money In']:.1f} • Money Out {best['Money Out']:.1f} • "
+            f"RSI {best['RSI']:.1f} • Trend {best['Trend Score']:.1f} • "
+            f"Entry {best['Entry Score']:.1f} • {best['Reason']}"
+        )
+
+        f1, f2, f3, f4 = st.columns(4)
+        only_ready = f1.checkbox("Only READY", value=False, key="radar_ready")
+        min_money = f2.slider("Money In ≥", 0, 100, 0, 5, key="radar_money")
+        max_rsi = f3.slider("RSI ≤", 30, 100, 100, 5, key="radar_rsi")
+        top_n = f4.selectbox(
+            "Hiển thị",
+            ["ALL", "10", "20", "40"],
+            index=0,
+            key="radar_top_n",
+        )
+
+        filtered = radar.copy()
+        if only_ready:
+            filtered = filtered[filtered["Setup"].astype(str).str.contains("RETEST CALL")]
+        filtered = filtered[
+            (pd.to_numeric(filtered["Money In"], errors="coerce") >= min_money)
+            & (pd.to_numeric(filtered["RSI"], errors="coerce") <= max_rsi)
+        ]
+        if top_n != "ALL":
+            filtered = filtered.head(int(top_n))
+
+        show_global_table(
+            entry_radar_display_frame(filtered),
+            height=650,
+            sticky_columns=("Ticker",),
+        )
+
+
+with tabs[3]:
     st.subheader("🤖 ATLAS BOT")
     scan = st.session_state.get("scan", pd.DataFrame())
     rotation = st.session_state.get("rotation", pd.DataFrame())
@@ -1321,55 +1550,9 @@ with tabs[2]:
                 st.warning(text)
 
 
-with tabs[11]:
-    st.subheader("📅 Earnings Radar — 14 ngày")
-    st.caption(
-        "Tự động chỉ hiện mã có ER trong 14 ngày. "
-        "Không cần chọn hàng chục ticker bằng các ô đỏ."
-    )
-
-    frame = st.session_state.get("earnings_14d", pd.DataFrame()).copy()
-
-    if frame.empty:
-        st.info(
-            "Snapshot hiện tại chưa có mã ER trong 14 ngày, hoặc lịch ER chưa "
-            "được tạo. Chạy lại GitHub Background Scanner sau khi cập nhật."
-        )
-    else:
-        display_columns = [
-            "Ticker", "ER Date", "Days to ER", "Timing",
-            "ER Guidance", "Source",
-        ]
-        display_columns = [c for c in display_columns if c in frame.columns]
-
-        e1, e2, e3 = st.columns(3)
-        e1.metric("ER trong 14 ngày", len(frame))
-        e2.metric(
-            "Trong 7 ngày",
-            int(
-                (
-                    pd.to_numeric(frame["Days to ER"], errors="coerce") <= 7
-                ).sum()
-            ) if "Days to ER" in frame.columns else 0,
-        )
-        e3.metric(
-            "Lỗi nguồn lịch",
-            int(st.session_state.get("earnings_failure_count", 0)),
-        )
-
-        show_global_table(
-            frame[display_columns],
-            height=520,
-            sticky_columns=("Ticker",),
-        )
-
-        st.warning(
-            "Trade thường: tránh giữ option xuyên ER. "
-            "ER Lotto chỉ dùng số tiền chấp nhận mất toàn bộ."
-        )
 
 
-with tabs[3]:
+with tabs[4]:
     st.subheader("Sector Rotation")
     rotation = st.session_state.get("rotation", pd.DataFrame())
     if rotation.empty:
@@ -1378,7 +1561,7 @@ with tabs[3]:
         st.dataframe(style_table(rotation), hide_index=True, use_container_width=True, height=620)
 
 
-with tabs[4]:
+with tabs[5]:
     st.subheader("Theme Rooms")
     scan = st.session_state.get("scan", pd.DataFrame())
     theme = st.selectbox("Theme", list(THEMES), key="theme_room")
@@ -1418,7 +1601,7 @@ with tabs[4]:
             )
 
 
-with tabs[5]:
+with tabs[6]:
     st.subheader("Trade Plan — Signal Fusion hợp nhất")
     scan = st.session_state.get("scan", pd.DataFrame())
     snapshot_symbols = scan["Ticker"].tolist() if not scan.empty else []
@@ -1464,19 +1647,15 @@ with tabs[5]:
         fusion = signal_fusion(base, flow, plan, {})
         retest = analyze_retest(daily, base)
 
-        # Signal Fusion + Trade Plan are now rendered inside one single panel.
-        fusion_section = signal_fusion_html(
-            ticker,
-            plan,
-            fusion,
-            retest,
-            base,
-            flow,
-            embedded=True,
+        # Keep the full Signal Fusion information, then the concrete plan.
+        components.html(
+            signal_fusion_html(ticker, plan, fusion, retest, base, flow),
+            height=760,
+            scrolling=True,
         )
         components.html(
-            trade_plan_html(plan, fusion_section=fusion_section),
-            height=1950,
+            trade_plan_html(plan),
+            height=1320,
             scrolling=True,
         )
 
@@ -1495,7 +1674,7 @@ with tabs[5]:
         st.warning("Không đủ dữ liệu để xây dựng Trade Plan.")
 
 
-with tabs[6]:
+with tabs[7]:
     st.subheader("Top CALL / PUT")
     scan = st.session_state.get("scan", pd.DataFrame())
 
@@ -1583,7 +1762,7 @@ Hệ thống chưa biết chắc giao dịch là opening, closing, hedge hay spr
 
 
 
-with tabs[7]:
+with tabs[8]:
     st.subheader("🌊 FLOW RADAR — Notable Option Activity")
     st.caption(
         "Được tính bởi GitHub Background Scanner và đọc từ snapshot. "
@@ -1661,82 +1840,48 @@ with tabs[7]:
             int((filtered_flow.get("Alignment", pd.Series(dtype=str)) == "ALIGNED").sum()),
         )
 
-        # Classic Flow Radar layout requested by the user.
-        # Preserve every contract row and all original decision columns.
-        # Source remains hidden because it is repeated on every row.
         flow_columns = [
-            "Ticker",
-            "Side",
-            "Contract",
-            "Flow Score",
-            "Alignment",
-            "Chart Bias",
-            "Overnight %",
-            "Overnight Bias",
-            "Overnight Confirm",
-            "Gap Risk",
-            "Premium Proxy",
-            "Volume",
-            "OI",
-            "Vol/OI",
-            "Spread %",
-            "IV %",
-            "Delta",
-            "DTE",
-            "Moneyness %",
-            "Interpretation",
-            "Trigger",
-            "Invalidation",
-            "Execution",
+            "Ticker", "Side", "Contract", "Flow Score", "Alignment",
+            "Chart Bias", "Overnight %", "Overnight Bias", "Overnight Confirm",
+            "Gap Risk", "Premium Proxy", "Volume", "OI", "Vol/OI",
+            "Spread %", "IV %", "Delta", "DTE", "Moneyness %",
+            "Interpretation", "Trigger", "Invalidation", "Execution",
         ]
-        flow_columns = [
-            column for column in flow_columns
-            if column in filtered_flow.columns
-        ]
+        flow_columns = [c for c in flow_columns if c in filtered_flow.columns]
 
         if filtered_flow.empty:
             st.info("Không có hợp đồng vượt bộ lọc hiện tại.")
         else:
+            # Keep every original contract and column, but group contracts from
+            # the same ticker together. Repeated ticker labels are hidden so
+            # NVDA, SPY, AVGO... read as clear visual groups.
             grouped_flow = filtered_flow.copy()
 
-            # Group AVGO contracts together, then BAC, CRM, JPM...
-            # Within each ticker, strongest Flow Score appears first.
-            sort_spec = [
-                ("Ticker", True),
-                ("Flow Score", False),
-                ("DTE", True),
-                ("Contract", True),
-            ]
             sort_columns = [
-                column for column, _ in sort_spec
+                column for column in ["Ticker", "Flow Score", "DTE", "Contract"]
                 if column in grouped_flow.columns
             ]
-            sort_ascending = [
-                ascending for column, ascending in sort_spec
-                if column in grouped_flow.columns
+            ascending = [
+                True if column == "Ticker" else False
+                for column in sort_columns
             ]
-
             if sort_columns:
                 grouped_flow = grouped_flow.sort_values(
                     sort_columns,
-                    ascending=sort_ascending,
+                    ascending=ascending,
                     kind="stable",
-                    na_position="last",
                 ).reset_index(drop=True)
 
             display_flow = grouped_flow[flow_columns].copy()
-
-            # Show ticker once at the start of each group, exactly like the
-            # requested screenshot, while preserving every contract underneath.
             if "Ticker" in display_flow.columns:
-                repeated = display_flow["Ticker"].eq(
+                duplicate_ticker = display_flow["Ticker"].eq(
                     display_flow["Ticker"].shift()
                 )
-                display_flow.loc[repeated, "Ticker"] = ""
+                display_flow.loc[duplicate_ticker, "Ticker"] = ""
 
             show_global_table(
                 display_flow,
-                height=720,
+                height=650,
                 sticky_columns=("Ticker",),
             )
 
@@ -1755,7 +1900,7 @@ with tabs[7]:
 
 
 
-with tabs[8]:
+with tabs[9]:
     st.subheader("Watch Engine")
     scan = st.session_state.get("scan", pd.DataFrame())
     watch = build_watch_actions(scan, personal_watch)
@@ -1770,7 +1915,7 @@ with tabs[8]:
 
 
 
-with tabs[9]:
+with tabs[10]:
     st.subheader("🧠 AI SEMI ONLY — CALL / PUT COMMAND CENTER")
     st.caption(
         "Chỉ phân tích nhóm AI–Semiconductor. "
@@ -1885,7 +2030,7 @@ with tabs[9]:
 
 
 
-with tabs[10]:
+with tabs[11]:
     st.subheader("🩺 System Health — Always-On Scanner")
 
     freshness = snapshot_freshness(
