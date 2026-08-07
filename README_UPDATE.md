@@ -1,33 +1,17 @@
-# ATLAS X 1.7 — Global Sticky Ticker
+# ATLAS X 2.3 UPDATE 01
 
-The frozen ticker behavior now applies to every table that contains a Ticker
-column, not only FAST PICKS.
+Upload/replace these files in the GitHub repository.
 
-Updated tables include:
+## Main changes in app.py
+- Entry Radar directly after Fast Picks.
+- Entry Radar scans the full snapshot Watchlist.
+- Sticky/frozen Ticker column.
+- CALL ranking using Money In/Out, RSI, Trend, Entry, Call/Put score and distance to Call Zone.
+- Human-readable Setup and concise Reason.
+- TP1 displayed when available from snapshot.
+- ER 14D tab removed.
+- Fixed incorrect tab index collisions in the supplied app.py.
+- Fast Picks no longer calls earnings APIs for every row while rendering.
+- Online status check cached for 60 seconds to reduce rerun latency.
 
-- HOME Top Opportunities
-- LIVE BOT
-- FAST PICKS
-- Option Shortlist
-- Earnings 14D
-- Theme Rooms
-- CALL Confirmed / CALL Watch
-- PUT Confirmed / PUT Watch
-- Watch Engine
-- AI SEMI ONLY
-- System Health ticker diagnostics
-
-Behavior:
-
-- Ticker remains visible while scrolling horizontally.
-- Header remains visible while scrolling vertically.
-- Important identity columns such as Action, Signal, Decision, or Conviction
-  are also frozen in selected trading tables.
-- Mobile touch scrolling remains enabled.
-- Tables without a Ticker column continue to use their normal layout.
-
-Minimum update:
-- app.py
-
-Commit:
-ATLAS X 1.7: apply sticky ticker to all trading tables
+The other four Python files are included unchanged from the supplied build so the ZIP can be uploaded as one coherent set.

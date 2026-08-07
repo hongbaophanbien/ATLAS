@@ -14,12 +14,7 @@ from reliability_engine import data_quality_summary, utc_now_iso
 from overnight_engine import overnight_metrics, apply_overnight_adjustment
 from option_flow_radar import build_flow_radar
 from sector_engine import THEMES, build_theme_rotation
-from snapshot_store import (
-    frame_to_records,
-    save_snapshot,
-    load_snapshot,
-    load_watchlist_settings,
-)
+from snapshot_store import frame_to_records, save_snapshot, load_watchlist_settings
 from watchlist_bot import build_signal_tables
 from atlas_signal_refresh_hotfix import apply_decisions
 
@@ -125,12 +120,7 @@ def build_flow_with_fallback(scan, opportunities):
     primary = opportunities if opportunities is not None and not opportunities.empty else scan
     diagnostics["attempted_primary"] = min(12, len(primary))
 
-    # Free Yahoo option chains can intermittently return empty responses.
-    # Retry once before moving to the fallback symbol basket.
     radar = build_flow_radar(scan, primary, max_symbols=12)
-    if radar is None or radar.empty:
-        time.sleep(3)
-        radar = build_flow_radar(scan, primary, max_symbols=12)
 
     if radar is None or radar.empty:
         fallback_order = [
@@ -147,14 +137,6 @@ def build_flow_with_fallback(scan, opportunities):
             diagnostics["attempted_fallback"] = len(available)
             radar = build_flow_radar(scan, available, max_symbols=len(available))
 
-            if radar is None or radar.empty:
-                time.sleep(3)
-                radar = build_flow_radar(
-                    scan,
-                    available,
-                    max_symbols=len(available),
-                )
-
     if radar is not None and not radar.empty:
         diagnostics["contracts_found"] = len(radar)
         diagnostics["status"] = "READY"
@@ -163,28 +145,9 @@ def build_flow_with_fallback(scan, opportunities):
         )
         return radar, diagnostics
 
-    # Never erase a previously valid contract board just because Yahoo had
-    # one empty option-chain cycle. Preserve the last valid Flow Radar and mark
-    # it clearly as cached.
-    try:
-        previous_payload = load_snapshot() or {}
-        previous_records = previous_payload.get("flow_radar") or []
-        previous_radar = pd.DataFrame(previous_records)
-
-        if not previous_radar.empty:
-            diagnostics["contracts_found"] = len(previous_radar)
-            diagnostics["status"] = "CACHED"
-            diagnostics["message"] = (
-                "Yahoo option-chain không trả contract mới trong chu kỳ này. "
-                f"Đang giữ {len(previous_radar)} contract hợp lệ từ snapshot trước."
-            )
-            return previous_radar, diagnostics
-    except Exception as exc:
-        print(f"Could not preserve previous Flow Radar: {exc}")
-
     diagnostics["message"] = (
-        "Không có hợp đồng vượt bộ lọc thanh khoản/premium và chưa có "
-        "snapshot Flow Radar cũ để khôi phục."
+        "Không có hợp đồng vượt bộ lọc thanh khoản/premium hoặc "
+        "nguồn option-chain không trả dữ liệu trong lần chạy này."
     )
     return pd.DataFrame(), diagnostics
 
