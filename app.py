@@ -877,8 +877,11 @@ def build_entry_radar(scan):
     if radar.empty:
         return radar
 
+    # Entry Radar: keep actionable CALL setups first, then sort Money In high → low.
+    # This makes the table immediately useful on open without allowing NO CHASE /
+    # INVALID names to jump above valid READY/NEAR setups only because flow is high.
     return radar.sort_values(
-        ["_setup_rank", "_zone_rank", "_quality", "Money In", "Entry Score", "Trend Score"],
+        ["_setup_rank", "_zone_rank", "Money In", "Entry Score", "Trend Score", "_quality"],
         ascending=[True, True, False, False, False, False],
         kind="stable",
     ).reset_index(drop=True)
